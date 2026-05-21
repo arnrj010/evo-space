@@ -1,4 +1,4 @@
-const CACHE = "evo-space-v2";
+const CACHE = "evo-space-v3";
 const ASSETS = [
   "/evo-space/",
   "/evo-space/index.html",
@@ -23,4 +23,26 @@ self.addEventListener("fetch", e => {
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request).catch(() => caches.match("/evo-space/")))
   );
+});
+
+// Handle notification display from service worker
+self.addEventListener("message", e => {
+  if (e.data && e.data.type === "SCHEDULE_NOTIFICATION") {
+    const { title, body, delay } = e.data;
+    setTimeout(() => {
+      self.registration.showNotification(title, {
+        body,
+        icon: "https://placehold.co/192x192/000000/ffffff?text=EVO",
+        badge: "https://placehold.co/96x96/000000/ffffff?text=EVO",
+        vibrate: [200, 100, 200],
+        tag: title,
+        renotify: true
+      });
+    }, delay);
+  }
+});
+
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  e.waitUntil(clients.openWindow("/evo-space/"));
 });
