@@ -84,15 +84,27 @@ function App() {
   const [moneyFilter, setMoneyFilter] = useState("All");
   const timers = useRef({});
 
-  useEffect(() => { saveData(data); }, [data]);
-  useEffect(() => { if ("Notification" in window) setNotifPerm(Notification.permission); }, []);
-  useEffect(() => {
+useEffect(() => {
     (data.tasks || []).forEach(tk => {
       if (!tk.completed && tk.reminder && tk.dueDate && tk.dueTime && !timers.current[tk.id]) {
         const due = new Date(`${tk.dueDate}T${tk.dueTime}`).getTime();
-        if (due > Date.now()) timers.current[tk.id] = setTimeout(() => {
-          if (Notification.permission === "granted") new Notification(`[${tk.tab}] Task Due!`, { body: tk.title });
-        }, due - Date.now());
+        const delay = due - Date.now();
+        if (delay > 0) {
+          timers.current[tk.id] = setTimeout(() => {
+            // Try service worker notification first (works in APK)
+            if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+              navigator.serviceWorker.controller.postMessage({
+                type: "SCHEDULE_NOTIFICATION",
+                title: `[${tk.tab}] Task Due!`,
+                body: tk.title,
+                delay: 0
+              });
+            } else if (Notification.permission === "granted") {
+              // Fallback to regular notification
+              new Notification(`[${tk.tab}] Task Due!`, { body: tk.title });
+            }
+          }, delay);
+        }
       }
     });
   }, [data.tasks]);
