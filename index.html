@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>EVO SPACE</title>
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="EVO SPACE" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: #000; overflow-x: hidden; }
+      input, select, button { -webkit-tap-highlight-color: transparent; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
+    <script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const MAIN_TABS = ["Work", "Personal", "Money"];
+const STORAGE_KEY = "taskmanager_v10";
+const CATS = ["Food", "Transport", "Shopping", "Bills", "Health", "Entertainment", "Salary", "Other"];
+const STREAK_GOAL = 7;
+
+function loadData() {
+  try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : { tasks: [], transactions: [], streak: 0, lastCompletedDate: null }; }
+  catch { return { tasks: [], transactions: [], streak: 0, lastCompletedDate: null }; }
+}
+function saveData(d) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {} }
+function todayStr() { return new Date().toISOString().split("T")[0]; }
+function formatDue(dd, dt) {
+  if (!dd) return null;
+  return new Date(`${dd}T${dt || "00:00"}`).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: dt ? "short" : undefined });
+}
+function isOverdue(dd, dt) {
+  if (!dd) return false;
+  return new Date(`${dd}T${dt || "23:59"}`) < new Date();
+}
+function fmtCurrency(n) {
+  return "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+const themes = {
+  dark:  { bg: "#000", sidebar: "#0a0a0a", card: "#111", border: "#1e1e1e", text: "#fff", sub: "#555", muted: "#2a2a2a", btnBg: "#fff", btnColor: "#000", activeTab: "#fff", activeTabColor: "#000", inactiveTabColor: "#555", streakFill: "#fff", streakTrack: "#1a1a1a" },
+  light: { bg: "#f0f0f0", sidebar: "#e8e8e8", card: "#fff", border: "#ddd", text: "#000", sub: "#999", muted: "#ccc", btnBg: "#000", btnColor: "#fff", activeTab: "#000", activeTabColor: "#fff", inactiveTabColor: "#aaa", streakFill: "#000", streakTrack: "#e0e0e0" },
+};
+
+function useWindowWidth() {
+  const [w, setW] = useState(window.innerWidth);
+  useEffect(() => {
+    const fn = () => setW(window.innerWidth);
+    window.addEventListener("resize", fn);
+    return () => window.removeEventListener("resize", fn);
+  }, []);
+  return w;
+}
+
+function App() {
+  const [dark, setDark] = useState(true);
+  const th = dark ? themes.dark : themes.light;
+  const width = useWindowWidth();
+  const isMobile = width < 600;
+  const isDesktop = width >= 1024;
+
+  const [data, setData] = useState(() => loadData());
+  const [activeTab, setActiveTab] = useState("Work");
+  const [title, setTitle] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [dueTime, setDueTime] = useState("");
+  const [reminder, setReminder] = useState(false);
+  const [notifPerm, setNotifPerm] = useState("default");
+  const [txDesc, setTxDesc] = useState("");
+  const [txAmount, setTxAmount] = useState("");
+  const [txType, setTxType] = useState("expense");
+  const [txCat, setTxCat] = useState("Food");
+  const [txDate, setTxDate] = useState(todayStr());
+  const [moneyFilter, setMoneyFilter] = useState("All");
+  const timers = useRef({});
+
+  useEffect(() => { saveData(data); }, [data]);
+  useEffect(() => { if ("Notification" in window) setNotifPerm(Notification.permission); }, []);
+  useEffect(() => {
+    (data.tasks || []).forEach(tk => {
+      if (!tk.completed && tk.reminder && tk.dueDate && tk.dueTime && !timers.current[tk.id]) {
+        const due = new Date(`${tk.dueDate}T${tk.dueTime}`).getTime();
+        if (due > Date.now()) timers.current[tk.id] = setTimeout(() => {
+          if (Notification.permission === "granted") new Notification(`[${tk.tab}] Task Due!`, { body: tk.title });
+        }, due - Date.now());
+      }
+    });
+  }, [data.tasks]);
+
+  const requestNotif = useCallback(() => {
+    if ("Notification" in window) Notification.requestPermission().then(p => setNotifPerm(p));
+  }, []);
+
+  const addTask = useCallback(() => {
+    if (!title.trim()) return;
+    setData(d => ({ ...d, tasks: [{ id: Date.now(), title: title.trim(), dueDate, dueTime, reminder, completed: false, tab: activeTab, createdAt: new Date().toISOString() }, ...(d.tasks || [])] }));
+    setTitle(""); setDueDate(""); setDueTime(""); setReminder(false);
+  }, [title, dueDate, dueTime, reminder, activeTab]);
+
+  const toggleTask = useCallback((id) => {
+    setData(d => {
+      const tasks = (d.tasks || []).map(tk => tk.id === id ? { ...tk, completed: !tk.completed } : tk);
+      const today = todayStr();
+      const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+      const anyDoneToday = tasks.some(tk => tk.completed && tk.createdAt?.startsWith(today));
+      let { streak, lastCompletedDate } = d;
+      if (anyDoneToday) {
+        if (lastCompletedDate !== today) {
+          streak = lastCompletedDate === yesterday ? streak + 1 : 1;
+          lastCompletedDate = today;
+        }
+      } else {
+        if (lastCompletedDate === today) {
+          streak = Math.max(0, streak - 1);
+          lastCompletedDate = streak > 0 ? yesterday : null;
+        }
+      }
+      return { ...d, tasks, streak, lastCompletedDate };
+    });
+  }, []);
+
+  const deleteTask = useCallback((id) => {
+    clearTimeout(timers.current[id]); delete timers.current[id];
+    setData(d => ({ ...d, tasks: (d.tasks || []).filter(tk => tk.id !== id) }));
+  }, []);
+
+  const addTransaction = useCallback(() => {
+    if (!txDesc.trim() || !txAmount || isNaN(txAmount) || Number(txAmount) <= 0) return;
+    setData(d => ({ ...d, transactions: [{ id: Date.now(), desc: txDesc.trim(), amount: parseFloat(txAmount), type: txType, cat: txCat, date: txDate || todayStr() }, ...(d.transactions || [])] }));
+    setTxDesc(""); setTxAmount(""); setTxType("expense"); setTxCat("Food"); setTxDate(todayStr());
+  }, [txDesc, txAmount, txType, txCat, txDate]);
+
+  const deleteTx = useCallback((id) => {
+    setData(d => ({ ...d, transactions: (d.transactions || []).filter(tx => tx.id !== id) }));
+  }, []);
+
+  const tasks = data.tasks || [];
+  const transactions = data.transactions || [];
+  const tabTasks = tasks.filter(tk => tk.tab === activeTab);
+  const pending = tabTasks.filter(tk => !tk.completed);
+  const done = tabTasks.filter(tk => tk.completed);
+  const completedToday = tasks.filter(tk => tk.completed && tk.createdAt?.startsWith(todayStr())).length;
+  const totalIncome = transactions.filter(tx => tx.type === "income").reduce((s, tx) => s + tx.amount, 0);
+  const totalExpense = transactions.filter(tx => tx.type === "expense").reduce((s, tx) => s + tx.amount, 0);
+  const balance = totalIncome - totalExpense;
+  const filteredTx = moneyFilter === "All" ? transactions : transactions.filter(tx => tx.type === moneyFilter.toLowerCase());
+  const streak = data.streak || 0;
+  const streakPct = streak === 0 ? 0 : Math.min(((streak % STREAK_GOAL) || STREAK_GOAL) / STREAK_GOAL * 100, 100);
+  const cycles = Math.floor(streak / STREAK_GOAL);
+  const filledTicks = streak === 0 ? 0 : (streak % STREAK_GOAL || STREAK_GOAL);
+
+  const inp = { background: "transparent", border: "none", borderBottom: `1px solid ${th.border}`, padding: "8px 0", color: th.text, fontSize: isMobile ? 14 : 13, outline: "none", boxSizing: "border-box", fontFamily: "inherit", width: "100%" };
+  const sel = { ...inp, cursor: "pointer", background: th.card };
+  const box = { background: th.card, border: `1px solid ${th.border}`, padding: isMobile ? "14px" : "14px 16px", marginBottom: 8 };
+  const addBtn = { background: th.btnBg, color: th.btnColor, border: "none", padding: "8px 16px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 1, fontFamily: "inherit", flexShrink: 0, width: isMobile ? "100%" : "auto" };
+  const ghostBtn = { background: "none", border: `1px solid ${th.border}`, color: th.sub, fontSize: 10, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit", letterSpacing: 1 };
+  const iconBtn = { background: "none", border: "none", color: th.muted, cursor: "pointer", fontSize: 16, padding: 0 };
+
+  return (
+    <div style={{ minHeight: "100vh", background: th.bg, color: th.text, fontFamily: "'Segoe UI', sans-serif", transition: "background 0.3s", display: "flex" }}>
+
+      {isDesktop && (
+        <div style={{ width: 200, background: th.sidebar, borderRight: `1px solid ${th.border}`, minHeight: "100vh", padding: "32px 0", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+          <div style={{ padding: "0 24px 32px" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: 3, color: th.text }}>EVO SPACE</div>
+            <div style={{ fontSize: 9, color: th.sub, letterSpacing: 3, marginTop: 2 }}>PRODUCTIVITY HUB</div>
+          </div>
+          {MAIN_TABS.map(tab => {
+            const count = tab === "Money" ? transactions.length : tasks.filter(tk => tk.tab === tab && !tk.completed).length;
+            const active = activeTab === tab;
+            return (
+              <button key={tab} onClick={() => setActiveTab(tab)} style={{ background: active ? th.activeTab : "transparent", color: active ? th.activeTabColor : th.inactiveTabColor, border: "none", borderLeft: active ? `2px solid ${th.text}` : "2px solid transparent", padding: "12px 24px", textAlign: "left", fontWeight: 700, fontSize: 11, letterSpacing: 2, cursor: "pointer", fontFamily: "inherit", transition: "all 0.2s", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                {tab.toUpperCase()}
+                {count > 0 && <span style={{ fontSize: 10, padding: "1px 7px", color: active ? th.activeTabColor : th.sub, background: th.border }}>{count}</span>}
+              </button>
+            );
+          })}
+          <div style={{ marginTop: "auto", padding: "0 24px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 9, color: th.sub, letterSpacing: 1 }}>{dark ? "DARK" : "LIGHT"}</span>
+              <div onClick={() => setDark(p => !p)} style={{ width: 36, height: 20, background: dark ? "#333" : "#ccc", borderRadius: 10, position: "relative", cursor: "pointer", transition: "background 0.3s", border: `1px solid ${th.border}` }}>
+                <div style={{ width: 14, height: 14, background: dark ? "#fff" : "#000", borderRadius: "50%", position: "absolute", top: 2, left: dark ? 18 : 2, transition: "left 0.3s" }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ flex: 1, padding: isMobile ? "20px 16px 90px" : width < 1024 ? "28px 24px 24px" : "32px 36px", maxWidth: isDesktop ? 700 : "100%", width: "100%" }}>
+
+        {!isDesktop && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, letterSpacing: 3 }}>EVO SPACE</div>
+              <div style={{ fontSize: 9, color: th.sub, letterSpacing: 3, marginTop: 2 }}>PRODUCTIVITY HUB</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 9, color: th.sub, letterSpacing: 1 }}>{dark ? "DARK" : "LIGHT"}</span>
+              <div onClick={() => setDark(p => !p)} style={{ width: 36, height: 20, background: dark ? "#333" : "#ccc", borderRadius: 10, position: "relative", cursor: "pointer", transition: "background 0.3s", border: `1px solid ${th.border}` }}>
+                <div style={{ width: 14, height: 14, background: dark ? "#fff" : "#000", borderRadius: "50%", position: "absolute", top: 2, left: dark ? 18 : 2, transition: "left 0.3s" }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ ...box, marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+            <div>
+              <span style={{ fontSize: 9, color: th.sub, letterSpacing: 2 }}>STREAK</span>
+              {cycles > 0 && <span style={{ marginLeft: 8, fontSize: 9, color: th.sub }}>x{cycles} cycle{cycles > 1 ? "s" : ""}</span>}
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+              <span style={{ fontSize: 22, fontWeight: 700, color: th.text, lineHeight: 1 }}>{streak}</span>
+              <span style={{ fontSize: 10, color: th.sub }}>/ {STREAK_GOAL} days</span>
+            </div>
+          </div>
+          <div style={{ height: 2, background: th.streakTrack, position: "relative", overflow: "hidden", marginBottom: 8 }}>
+            <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${streakPct}%`, background: th.streakFill, transition: "width 0.5s ease" }} />
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            {Array.from({ length: STREAK_GOAL }).map((_, i) => (
+              <div key={i} style={{ flex: 1, height: 4, background: i < filledTicks ? th.streakFill : th.streakTrack, transition: "background 0.3s" }} />
+            ))}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
+            <span style={{ fontSize: 9, color: th.muted }}>DAY 1</span>
+            <span style={{ fontSize: 9, color: th.muted }}>DAY {STREAK_GOAL}</span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+          {[{ l: "TODAY", v: `${completedToday} done` }, { l: "BALANCE", v: fmtCurrency(balance) }].map(s => (
+            <div key={s.l} style={{ flex: 1, background: th.card, border: `1px solid ${th.border}`, padding: "10px 12px" }}>
+              <div style={{ fontSize: 9, color: th.sub, letterSpacing: 2, marginBottom: 4 }}>{s.l}</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{s.v}</div>
+            </div>
+          ))}
+        </div>
+
+        {!isMobile && !isDesktop && (
+          <div style={{ display: "flex", background: th.card, border: `1px solid ${th.border}`, marginBottom: 20 }}>
+            {MAIN_TABS.map((tab, i) => {
+              const count = tab === "Money" ? transactions.length : tasks.filter(tk => tk.tab === tab && !tk.completed).length;
+              const active = activeTab === tab;
+              return (
+                <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: "12px 0", border: "none", borderRight: i < 2 ? `1px solid ${th.border}` : "none", background: active ? th.activeTab : "transparent", color: active ? th.activeTabColor : th.inactiveTabColor, fontWeight: 700, fontSize: 11, letterSpacing: 2, cursor: "pointer", fontFamily: "inherit", transition: "all 0.2s" }}>
+                  {tab.toUpperCase()}{count > 0 && <span style={{ marginLeft: 5, opacity: 0.5, fontSize: 10 }}>{count}</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {isDesktop && <div style={{ fontSize: 11, color: th.sub, letterSpacing: 2, marginBottom: 20, fontWeight: 700 }}>{activeTab.toUpperCase()}</div>}
+
+        {activeTab !== "Money" && (
+          <>
+            <div style={box}>
+              <input value={title} onChange={e => setTitle(e.target.value)} onKeyDown={e => e.key === "Enter" && addTask()}
+                placeholder={`New ${activeTab.toLowerCase()} task...`} style={{ ...inp, marginBottom: 10 }} />
+              <div style={{ display: "flex", gap: 8, flexWrap: isMobile ? "wrap" : "nowrap", alignItems: "center" }}>
+                <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} style={{ ...inp, flex: 1, minWidth: 120 }} />
+                <input type="time" value={dueTime} onChange={e => setDueTime(e.target.value)} style={{ ...inp, flex: 1, minWidth: 100 }} />
+                <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", flexShrink: 0, color: th.sub, fontSize: 10, letterSpacing: 1, whiteSpace: "nowrap" }}>
+                  <input type="checkbox" checked={reminder} onChange={e => setReminder(e.target.checked)} style={{ accentColor: th.text, width: 12, height: 12, cursor: "pointer" }} />
+                  REMIND
+                </label>
+                <button onClick={addTask} style={addBtn}>ADD</button>
+              </div>
+            </div>
+
+            {notifPerm !== "granted" && (
+              <div style={{ ...box, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ color: th.sub, fontSize: 11, letterSpacing: 1 }}>REMINDERS OFF</span>
+                <button onClick={requestNotif} style={ghostBtn}>ENABLE</button>
+              </div>
+            )}
+
+            <div style={{ fontSize: 9, color: th.sub, letterSpacing: 2, margin: "12px 0 8px" }}>PENDING — {pending.length}</div>
+            {pending.length === 0
+              ? <div style={{ ...box, color: th.sub, fontSize: 12, textAlign: "center", padding: "20px" }}>No pending tasks</div>
+              : pending.map(tk => {
+                const overdue = isOverdue(tk.dueDate, tk.dueTime);
+                return (
+                  <div key={tk.id} style={{ ...box, display: "flex", alignItems: "flex-start", gap: 12, borderLeft: overdue ? `2px solid ${th.sub}` : `1px solid ${th.border}` }}>
+                    <button onClick={() => toggleTask(tk.id)} style={{ width: 16, height: 16, border: `1px solid ${th.sub}`, background: "transparent", cursor: "pointer", flexShrink: 0, marginTop: 3 }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: isMobile ? 14 : 13, color: th.text }}>{tk.title}</div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
+                        {tk.dueDate && <span style={{ fontSize: 11, color: overdue ? th.sub : th.muted }}>{overdue ? "OVERDUE - " : ""}{formatDue(tk.dueDate, tk.dueTime)}</span>}
+                        {tk.reminder && <span style={{ fontSize: 9, color: th.sub, letterSpacing: 1, border: `1px solid ${th.border}`, padding: "1px 5px" }}>REMIND</span>}
+                      </div>
+                    </div>
+                    <button onClick={() => deleteTask(tk.id)} style={iconBtn}>x</button>
+                  </div>
+                );
+              })}
+
+            {done.length > 0 && (
+              <>
+                <div style={{ fontSize: 9, color: th.muted, letterSpacing: 2, margin: "16px 0 8px" }}>COMPLETED — {done.length}</div>
+                {done.map(tk => (
+                  <div key={tk.id} style={{ ...box, display: "flex", alignItems: "center", gap: 12, opacity: 0.35 }}>
+                    <button onClick={() => toggleTask(tk.id)} style={{ width: 16, height: 16, border: "none", background: th.text, cursor: "pointer", flexShrink: 0 }} />
+                    <div style={{ fontSize: isMobile ? 14 : 13, color: th.sub, textDecoration: "line-through", flex: 1 }}>{tk.title}</div>
+                    <button onClick={() => deleteTask(tk.id)} style={iconBtn}>x</button>
+                  </div>
+                ))}
+              </>
+            )}
+          </>
+        )}
+
+        {activeTab === "Money" && (
+          <>
+            <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+              {[{ l: "INCOME", v: totalIncome }, { l: "EXPENSES", v: totalExpense }, { l: "BALANCE", v: balance }].map(c => (
+                <div key={c.l} style={{ flex: 1, background: th.card, border: `1px solid ${th.border}`, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 9, color: th.sub, letterSpacing: 2, marginBottom: 4 }}>{c.l}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: c.l === "EXPENSES" ? th.sub : th.text }}>{fmtCurrency(c.v)}</div>
+                </div>
+              ))}
+            </div>
+            <div style={box}>
+              <input value={txDesc} onChange={e => setTxDesc(e.target.value)} onKeyDown={e => e.key === "Enter" && addTransaction()}
+                placeholder="Description" style={{ ...inp, marginBottom: 10 }} />
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: isMobile ? "wrap" : "nowrap" }}>
+                <input type="number" value={txAmount} onChange={e => setTxAmount(e.target.value)} placeholder="Amount (Rs)" style={{ ...inp, flex: 1 }} />
+                <select value={txType} onChange={e => setTxType(e.target.value)} style={{ ...sel, flex: 1 }}>
+                  <option value="expense">Expense</option>
+                  <option value="income">Income</option>
+                </select>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: isMobile ? "wrap" : "nowrap" }}>
+                <select value={txCat} onChange={e => setTxCat(e.target.value)} style={{ ...sel, flex: 1 }}>{CATS.map(c => <option key={c}>{c}</option>)}</select>
+                <input type="date" value={txDate} onChange={e => setTxDate(e.target.value)} style={{ ...inp, flex: 1 }} />
+                <button onClick={addTransaction} style={addBtn}>ADD</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+              {["All", "Income", "Expense"].map(f => (
+                <button key={f} onClick={() => setMoneyFilter(f)} style={{ background: moneyFilter === f ? th.btnBg : th.card, color: moneyFilter === f ? th.btnColor : th.sub, border: `1px solid ${th.border}`, padding: "6px 14px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 1, fontFamily: "inherit", transition: "all 0.2s" }}>{f.toUpperCase()}</button>
+              ))}
+            </div>
+            <div style={{ fontSize: 9, color: th.sub, letterSpacing: 2, marginBottom: 8 }}>TRANSACTIONS — {filteredTx.length}</div>
+            {filteredTx.length === 0
+              ? <div style={{ ...box, color: th.sub, fontSize: 12, textAlign: "center", padding: "20px" }}>No transactions yet</div>
+              : filteredTx.map(tx => (
+                <div key={tx.id} style={{ ...box, display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: isMobile ? 14 : 13, color: th.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tx.desc}</div>
+                    <div style={{ fontSize: 11, color: th.muted, marginTop: 3 }}>{tx.cat} - {new Date(tx.date).toLocaleDateString("en-IN", { dateStyle: "medium" })}</div>
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: tx.type === "income" ? th.text : th.sub, flexShrink: 0 }}>
+                    {tx.type === "income" ? "+" : "-"}{fmtCurrency(tx.amount)}
+                  </div>
+                  <button onClick={() => deleteTx(tx.id)} style={iconBtn}>x</button>
+                </div>
+              ))}
+          </>
+        )}
+      </div>
+
+      {isMobile && (
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: th.card, borderTop: `1px solid ${th.border}`, display: "flex", zIndex: 100 }}>
+          {MAIN_TABS.map(tab => {
+            const active = activeTab === tab;
+            const count = tab === "Money" ? transactions.length : tasks.filter(tk => tk.tab === tab && !tk.completed).length;
+            return (
+              <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: "12px 0 10px", border: "none", background: "transparent", color: active ? th.text : th.sub, cursor: "pointer", fontFamily: "inherit", borderTop: active ? `2px solid ${th.text}` : "2px solid transparent", transition: "all 0.2s" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2 }}>{tab.toUpperCase()}</div>
+                {count > 0 && <div style={{ fontSize: 9, color: th.sub, marginTop: 2 }}>{count}</div>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('sw.js').catch(() => {});
+        });
+      }
+    </script>
+  </body>
+</html>
