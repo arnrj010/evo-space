@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>EVO SPACE</title>
-    <link rel="manifest" href="manifest.json" />
+    <link rel="manifest" href="/evo-space/manifest.json" />
     <meta name="theme-color" content="#000000" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -394,7 +394,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('sw.js').catch(() => {});
+          navigator.serviceWorker.register('/evo-space/sw.js').catch(() => {});
         });
       }
     </script>
