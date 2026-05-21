@@ -32,8 +32,8 @@ self.addEventListener("message", e => {
     setTimeout(() => {
       self.registration.showNotification(title, {
         body,
-        icon: "https://placehold.co/192x192/000000/ffffff?text=EVO",
-        badge: "https://placehold.co/96x96/000000/ffffff?text=EVO",
+        icon: "/evo-space/icon-192.png",
+        badge: "/evo-space/icon-192.png",
         vibrate: [200, 100, 200],
         tag: title,
         renotify: true
