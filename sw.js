@@ -1,4 +1,4 @@
-const CACHE = "evo-space-v1";
+const CACHE = "evo-space-v2";
 const ASSETS = [
   "/evo-space/",
   "/evo-space/index.html",
